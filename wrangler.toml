@@ -1,0 +1,9 @@
+name = "disc"
+main = "index.js"
+compatibility_date = "2026-03-27"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "disc"
+database_id = "在这里填入您的D1数据库ID"
+
