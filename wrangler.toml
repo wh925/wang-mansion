@@ -5,4 +5,4 @@ compatibility_date = "2026-03-27"
 [vars]
 DISCOGS_USER = "tangrou"
 # 直接在这里填入你的令牌，这样每次 GitHub 部署都会自动带上它
-DISCOGS_TOKEN = "这里填入你那一长串Discogs令牌"
+DISCOGS_TOKEN = "yrTpGYaxhsOVBdzJnYMFOeeiNZBguloPqzPUYjdv"
