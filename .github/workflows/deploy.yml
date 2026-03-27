@@ -1,21 +1,16 @@
-name: Deploy to Cloudflare Workers
+name: Deploy
 
 on:
   push:
     branches:
-      - main  # 如果你的主分支叫 master，请改为 master
+      - main
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout Code
-        uses: actions/checkout@v4
-
-      - name: Publish to Cloudflare
+      - uses: actions/checkout@v4
+      - name: Publish
         uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CF_API_TOKEN }}
-          # 如果你的项目需要特定的命令（比如 npm run build），可以在下面添加
-          # command: publish 
-
