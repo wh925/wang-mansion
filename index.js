@@ -2,91 +2,110 @@ export default {
   async fetch(request, env) {
     const discogsUser = "tangrou";
     const discogsToken = env.DISCOGS_TOKEN;
+    const url = new URL(request.url);
+    const page = url.searchParams.get("page") || "1";
+    const perPage = "40"; // 双列布局建议每页 40 张，刚好 20 行
 
     try {
-      const apiResponse = await fetch(`https://api.discogs.com/users/${discogsUser}/collection/folders/0/releases?sort=added&sort_order=desc&per_page=50`, {
+      const apiResponse = await fetch(`https://api.discogs.com/users/${discogsUser}/collection/folders/0/releases?sort=added&sort_order=desc&per_page=${perPage}&page=${page}`, {
         headers: {
-          'User-Agent': 'WangMansionArchive/1.1',
+          'User-Agent': 'WangMansionArchive/1.3',
           'Authorization': `Discogs token=${discogsToken}`
         }
       });
       
       const data = await apiResponse.json();
-      if (!data.releases) throw new Error("API返回数据格式错误");
-      
       const records = data.releases;
-      const allStyles = [...new Set(records.flatMap(r => r.basic_information.styles || []))].sort();
+      const pagination = data.pagination;
 
       const html = `
 <!DOCTYPE html>
 <html>
 <head>
     <meta charset="UTF-8">
-    <title>WANG-MANSION</title>
+    <title>WANG-MANSION | ARCHIVE</title>
     <style>
-        :root { --bg: #0a0a0a; --text: #e0e0e0; --muted: #444; --line: #1a1a1a; }
-        body { background-color: var(--bg); color: var(--text); font-family: "Inter", serif; margin: 0; padding: 0; }
-        #filter-panel { position: fixed; top: -100%; left: 0; width: 100%; background: #0e0e0e; z-index: 100; transition: 0.6s; padding: 80px 5vw; box-sizing: border-box; border-bottom: 1px solid var(--line); }
-        #filter-panel.open { top: 0; }
-        .tag-cloud { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 20px; }
-        .tag { font-size: 0.7rem; color: #666; cursor: pointer; border: 1px solid #222; padding: 4px 12px; }
-        .tag.active { color: #fff; border-color: #555; }
-        #search-input { width: 100%; background: transparent; border: none; border-bottom: 1px solid #222; color: #fff; font-size: 1.5rem; outline: none; padding: 10px 0; }
-        .container { max-width: 1400px; margin: 0 auto; padding: 8vh 5vw; }
-        header { display: flex; justify-content: space-between; border-bottom: 1px solid var(--line); padding-bottom: 30px; margin-bottom: 60px; }
-        h1 { font-weight: 200; letter-spacing: 0.3em; cursor: pointer; margin: 0; font-size: 1.8rem; }
-        .archive-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 50px 30px; }
-        .record { text-decoration: none; color: inherit; }
-        .record.hidden { display: none; }
-        .img-box { aspect-ratio: 1/1; background: #111; overflow: hidden; margin-bottom: 15px; }
-        img { width: 100%; height: 100%; object-fit: cover; filter: grayscale(1); transition: 0.5s; }
-        .record:hover img { filter: grayscale(0); }
-        .title { font-size: 0.9rem; margin-bottom: 5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-        .artist { color: var(--muted); font-size: 0.7rem; text-transform: uppercase; }
+        :root { --bg: #0a0a0a; --text: #e0e0e0; --muted: #444; --line: #151515; }
+        body { background-color: var(--bg); color: var(--text); font-family: "Inter", "Georgia", serif; margin: 0; padding: 0; -webkit-font-smoothing: antialiased; }
+        
+        /* 核心调整：收窄容器，让两列布局显得精致而不空洞 */
+        .container { max-width: 1000px; margin: 0 auto; padding: 12vh 8vw 20vh 8vw; }
+
+        header { border-bottom: 1px solid var(--line); padding-bottom: 50px; margin-bottom: 100px; text-align: center; }
+        h1 { font-weight: 200; letter-spacing: 0.5em; cursor: pointer; margin: 0; font-size: 1.4rem; text-transform: uppercase; }
+        .stats { font-size: 0.6rem; letter-spacing: 4px; color: #333; margin-top: 20px; text-transform: uppercase; }
+
+        /* 强制双列布局 */
+        .archive-grid { 
+            display: grid; 
+            grid-template-columns: 1fr 1fr; 
+            gap: 120px 60px; /* 极大的上下间距，营造画册感 */
+        }
+
+        .record { text-decoration: none; color: inherit; display: block; }
+        
+        .img-box { 
+            aspect-ratio: 1/1; 
+            background: #0d0d0d; 
+            overflow: hidden; 
+            margin-bottom: 30px; 
+            border: 1px solid #111;
+        }
+        
+        img { width: 100%; height: 100%; object-fit: cover; filter: grayscale(1) contrast(1.1); transition: filter 1s ease; }
+        .record:hover img { filter: grayscale(0) contrast(1); }
+
+        .info { text-align: center; padding: 0 10%; } /* 文字居中，符合双列审美 */
+        .title { font-size: 0.9rem; margin-bottom: 8px; font-weight: 400; letter-spacing: 0.05em; line-height: 1.4; }
+        .artist { color: var(--muted); font-size: 0.7rem; text-transform: uppercase; letter-spacing: 3px; font-weight: 300; }
+
+        /* 极简底部翻页 */
+        .pagination-bar {
+            position: fixed; bottom: 50px; left: 0; width: 100%;
+            display: flex; justify-content: center; gap: 40px; align-items: center; z-index: 90;
+        }
+        .page-link { color: #333; text-decoration: none; font-size: 0.6rem; letter-spacing: 3px; transition: 0.3s; }
+        .page-link:hover { color: #888; }
+        .page-current { color: #555; font-size: 0.6rem; letter-spacing: 2px; }
+        .disabled { visibility: hidden; }
+
+        /* 移动端自动回归单列，防止图片太小 */
+        @media (max-width: 768px) {
+            .archive-grid { grid-template-columns: 1fr; gap: 80px 0; }
+            h1 { font-size: 1.1rem; letter-spacing: 0.3em; }
+        }
     </style>
 </head>
 <body>
-    <div id="filter-panel">
-        <input type="text" id="search-input" placeholder="SEARCH...">
-        <div class="tag-cloud">
-            <div class="tag active" data-style="all">ALL</div>
-            ${allStyles.map(s => `<div class="tag" data-style="${s}">${s}</div>`).join('')}
-        </div>
-        <p onclick="toggle()" style="color:#444; cursor:pointer; margin-top:30px;">CLOSE</p>
-    </div>
     <div class="container">
-        <header><h1 onclick="toggle()">WANG-MANSION</h1><div onclick="toggle()" style="cursor:pointer; color:#444;">FILTER</div></header>
+        <header>
+            <h1>WANG-MANSION</h1>
+            <div class="stats">COLLECTION NO. ${pagination.items}</div>
+        </header>
+
         <div class="archive-grid">
             ${records.map(r => `
-                <a href="https://www.discogs.com/release/${r.id}" class="record" target="_blank" data-title="${r.basic_information.title.toLowerCase()}" data-artist="${r.basic_information.artists[0].name.toLowerCase()}" data-styles="${(r.basic_information.styles || []).join(',').toLowerCase()}">
+                <a href="https://www.discogs.com/release/${r.id}" class="record" target="_blank">
                     <div class="img-box"><img src="${r.basic_information.cover_image}" loading="lazy"></div>
-                    <div class="info"><div class="title">${r.basic_information.title}</div><div class="artist">${r.basic_information.artists[0].name}</div></div>
+                    <div class="info">
+                        <div class="title">${r.basic_information.title}</div>
+                        <div class="artist">${r.basic_information.artists[0].name}</div>
+                    </div>
                 </a>
             `).join('')}
         </div>
     </div>
-    <script>
-        function toggle() { document.getElementById('filter-panel').classList.toggle('open'); }
-        const input = document.getElementById('search-input');
-        const recs = document.querySelectorAll('.record');
-        const tags = document.querySelectorAll('.tag');
-        let activeStyle = 'all';
-        function doFilter() {
-            const val = input.value.toLowerCase();
-            recs.forEach(r => {
-                const mSearch = r.dataset.title.includes(val) || r.dataset.artist.includes(val);
-                const mStyle = activeStyle === 'all' || r.dataset.styles.includes(activeStyle.toLowerCase());
-                r.classList.toggle('hidden', !(mSearch && mStyle));
-            });
-        }
-        input.oninput = doFilter;
-        tags.forEach(t => { t.onclick = () => { tags.forEach(x => x.classList.remove('active')); t.classList.add('active'); activeStyle = t.dataset.style; doFilter(); }; });
-    </script>
+
+    <div class="pagination-bar">
+        <a href="?page=${parseInt(page) - 1}" class="page-link ${page == 1 ? 'disabled' : ''}">BACK</a>
+        <span class="page-current">${page} / ${pagination.pages}</span>
+        <a href="?page=${parseInt(page) + 1}" class="page-link ${page == pagination.pages ? 'disabled' : ''}">NEXT</a>
+    </div>
 </body>
 </html>`;
       return new Response(html, { headers: { "content-type": "text/html;charset=UTF-8" } });
     } catch (e) {
-      return new Response("Error: " + e.message, { status: 500 });
+      return new Response("Runtime Error: " + e.message, { status: 500 });
     }
   }
 };
