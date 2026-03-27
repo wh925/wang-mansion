@@ -2,6 +2,7 @@ name = "disc"
 main = "index.js"
 compatibility_date = "2026-03-27"
 
-# 这一行是关键！它告诉 Worker 去读取 GitHub 的 Secret
 [vars]
 DISCOGS_USER = "tangrou"
+# 直接在这里填入你的令牌，这样每次 GitHub 部署都会自动带上它
+DISCOGS_TOKEN = "这里填入你那一长串Discogs令牌"
