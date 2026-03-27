@@ -1,6 +1,6 @@
 name = "disc"
-main = "index.js" # 如果你的主代码文件叫 worker.js，请把这里改成 worker.js
+main = "index.js"
 compatibility_date = "2026-03-27"
 
 [vars]
-# 这里可以留空，或者放你的环境变量
+# 保持简洁，暂时不需要复杂配置
