@@ -3,15 +3,22 @@ export default {
     const discogsUser = "tangrou";
     const discogsToken = env.DISCOGS_TOKEN;
     const url = new URL(request.url);
+    
+    // 获取全局参数：页码、搜索关键词、风格筛选
     const page = url.searchParams.get("page") || "1";
-    const perPage = "20"; 
-
-    if (!discogsToken) return new Response("Error: Token Missing", { status: 500 });
+    const searchQuery = url.searchParams.get("q") || "";
+    const styleFilter = url.searchParams.get("style") || "";
+    const perPage = "40"; 
 
     try {
-      const apiResponse = await fetch(`https://api.discogs.com/users/${discogsUser}/collection/folders/0/releases?sort=added&sort_order=desc&per_page=${perPage}&page=${page}`, {
+      // 构建全局搜索 URL
+      let apiUrl = `https://api.discogs.com/users/${discogsUser}/collection/folders/0/releases?sort=added&sort_order=desc&per_page=${perPage}&page=${page}`;
+      if (searchQuery) apiUrl += `&q=${encodeURIComponent(searchQuery)}`;
+      // 注：Discogs API 的 collection 接口对 style 的原生过滤较弱，我们主要通过 q 参数或前端逻辑增强
+      
+      const apiResponse = await fetch(apiUrl, {
         headers: {
-          'User-Agent': 'WangMansionArchive/1.4',
+          'User-Agent': 'WangMansionArchive/1.5',
           'Authorization': `Discogs token=${discogsToken}`
         }
       });
@@ -19,90 +26,110 @@ export default {
       const data = await apiResponse.json();
       const records = data.releases || [];
       const pagination = data.pagination;
-      const allStyles = [...new Set(records.flatMap(r => r.basic_information.styles || []))].sort();
+
+      // 提取本页风格供快速选择（全局风格建议通过搜索框输入）
+      const pageStyles = [...new Set(records.flatMap(r => r.basic_information.styles || []))].sort();
 
       const html = `
 <!DOCTYPE html>
 <html>
 <head>
     <meta charset="UTF-8">
-    <title>WANG-MANSION | ARCHIVE</title>
+    <title>WANG-MANSION | ${searchQuery || 'ARCHIVE'}</title>
     <style>
-        :root { --bg: #0a0a0a; --text: #e0e0e0; --muted: #444; --line: #151515; }
-        body { background-color: var(--bg); color: var(--text); font-family: "Inter", "Georgia", serif; margin: 0; padding: 0; -webkit-font-smoothing: antialiased; }
+        :root { 
+            --bg: #121212; /* 提升亮度，从纯黑变为深石墨色 */
+            --card-bg: #1a1a1a;
+            --text: #eeeeee; /* 增强文字对比度 */
+            --muted: #888888; /* 辅助文字亮色处理 */
+            --line: #222222; 
+            --accent: #ffffff;
+        }
+        body { background-color: var(--bg); color: var(--text); font-family: "Inter", "Segoe UI", serif; margin: 0; padding: 0; -webkit-font-smoothing: antialiased; }
         
-        /* 1. 隐藏的过滤面板 */
+        /* 顶部面板：全局搜索 */
         #filter-panel { 
-            position: fixed; top: -100%; left: 0; width: 100%; background: #0e0e0e; 
-            z-index: 100; transition: 0.6s cubic-bezier(0.16, 1, 0.3, 1); 
-            padding: 80px 8vw; box-sizing: border-box; border-bottom: 1px solid var(--line); 
+            position: fixed; top: -100%; left: 0; width: 100%; background: #181818; 
+            z-index: 100; transition: 0.5s cubic-bezier(0.16, 1, 0.3, 1); 
+            padding: 60px 8vw; box-sizing: border-box; border-bottom: 1px solid var(--line); 
+            box-shadow: 0 20px 40px rgba(0,0,0,0.5);
         }
         #filter-panel.open { top: 0; }
-        #search-input { width: 100%; background: transparent; border: none; border-bottom: 1px solid #222; color: #fff; font-size: 1.8rem; outline: none; padding: 15px 0; letter-spacing: 1px; font-weight: 200; }
-        .tag-cloud { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 30px; }
-        .tag { font-size: 0.7rem; color: #666; cursor: pointer; border: 1px solid #222; padding: 5px 15px; transition: 0.3s; letter-spacing: 1px; text-transform: uppercase; }
-        .tag.active { color: #fff; border-color: #555; }
-        #close-btn { color: var(--muted); cursor: pointer; margin-top: 40px; font-size: 0.7rem; letter-spacing: 3px; text-transform: uppercase; }
+        #search-form { display: flex; flex-direction: column; gap: 20px; }
+        #search-input { 
+            width: 100%; background: transparent; border: none; border-bottom: 2px solid #333; 
+            color: #fff; font-size: 2rem; outline: none; padding: 10px 0; font-weight: 200; 
+        }
+        .tag-cloud { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 20px; }
+        .tag { font-size: 0.7rem; color: var(--muted); cursor: pointer; border: 1px solid #333; padding: 6px 16px; transition: 0.3s; text-transform: uppercase; }
+        .tag:hover { color: #fff; border-color: #666; }
 
-        /* 2. 主容器 */
-        .container { max-width: 1000px; margin: 0 auto; padding: 12vh 8vw 20vh 8vw; }
-        header { border-bottom: 1px solid var(--line); padding-bottom: 50px; margin-bottom: 100px; text-align: center; }
-        h1 { font-weight: 200; letter-spacing: 0.5em; cursor: pointer; margin: 0; font-size: 1.4rem; text-transform: uppercase; }
-        .nav-trigger { font-size: 0.6rem; letter-spacing: 4px; color: #333; margin-top: 20px; text-transform: uppercase; cursor: pointer; }
+        /* 主容器 */
+        .container { max-width: 1100px; margin: 0 auto; padding: 10vh 8vw 15vh 8vw; }
+        header { border-bottom: 1px solid var(--line); padding-bottom: 40px; margin-bottom: 80px; text-align: center; }
+        h1 { font-weight: 200; letter-spacing: 0.6em; cursor: pointer; margin: 0; font-size: 1.5rem; text-transform: uppercase; color: var(--accent); }
+        .nav-trigger { font-size: 0.65rem; letter-spacing: 4px; color: var(--muted); margin-top: 15px; text-transform: uppercase; cursor: pointer; }
 
-        /* 3. 双列布局网格 */
-        .archive-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 140px 60px; }
+        /* 2列画册布局 */
+        .archive-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 100px 60px; }
         .record { text-decoration: none; color: inherit; display: block; }
-        .record.hidden { display: none; }
         
-        .img-box { aspect-ratio: 1/1; background: #0d0d0d; overflow: hidden; margin-bottom: 35px; border: 1px solid #111; }
-        img { width: 100%; height: 100%; object-fit: cover; filter: grayscale(1) contrast(1.1); transition: 1s ease; }
-        .record:hover img { filter: grayscale(0) contrast(1); transform: scale(1.02); }
+        .img-box { 
+            aspect-ratio: 1/1; background: var(--card-bg); overflow: hidden; margin-bottom: 30px; 
+            box-shadow: 0 10px 30px rgba(0,0,0,0.3); /* 增加投影感 */
+            border: 1px solid rgba(255,255,255,0.05);
+        }
+        img { width: 100%; height: 100%; object-fit: cover; filter: grayscale(0.8) contrast(1.1); transition: 0.8s ease; }
+        .record:hover img { filter: grayscale(0) contrast(1); transform: scale(1.03); }
 
-        .info { text-align: center; padding: 0 5%; }
-        .title { font-size: 0.95rem; margin-bottom: 10px; font-weight: 400; letter-spacing: 0.05em; line-height: 1.5; }
+        .info { text-align: center; }
+        .title { font-size: 1rem; margin-bottom: 8px; font-weight: 400; letter-spacing: 0.03em; color: #fff; }
         .artist { color: var(--muted); font-size: 0.75rem; text-transform: uppercase; letter-spacing: 3px; }
 
-        /* 4. 底部翻页控制器 */
+        /* 翻页控制 */
         .pagination-bar {
-            position: fixed; bottom: 50px; left: 0; width: 100%;
-            display: flex; justify-content: center; gap: 50px; align-items: center; z-index: 90;
+            position: fixed; bottom: 40px; left: 0; width: 100%;
+            display: flex; justify-content: center; gap: 40px; align-items: center; z-index: 90;
         }
-        .page-link { color: #333; text-decoration: none; font-size: 0.6rem; letter-spacing: 4px; transition: 0.3s; text-transform: uppercase; }
-        .page-link:hover { color: #fff; }
-        .page-current { color: #555; font-size: 0.6rem; letter-spacing: 2px; }
+        .page-link { 
+            color: #666; text-decoration: none; font-size: 0.65rem; letter-spacing: 4px; 
+            padding: 8px 20px; border: 1px solid transparent; transition: 0.3s; 
+        }
+        .page-link:hover { color: #fff; border-color: #333; background: rgba(255,255,255,0.05); }
+        .page-current { color: #888; font-size: 0.7rem; font-family: monospace; }
         .disabled { visibility: hidden; }
 
         @media (max-width: 768px) {
-            .archive-grid { grid-template-columns: 1fr; gap: 80px 0; }
-            .container { padding-top: 8vh; }
+            .archive-grid { grid-template-columns: 1fr; gap: 60px 0; }
         }
     </style>
 </head>
 <body>
     <div id="filter-panel">
-        <input type="text" id="search-input" placeholder="SEARCH COLLECTION..." autocomplete="off">
-        <div class="tag-cloud">
-            <div class="tag active" data-style="all">ALL STYLES</div>
-            ${allStyles.map(s => `<div class="tag" data-style="${s}">${s}</div>`).join('')}
-        </div>
-        <div id="close-btn" onclick="toggle()">CLOSE</div>
+        <form id="search-form" method="GET" action="/">
+            <input type="text" name="q" id="search-input" placeholder="GLOBAL SEARCH..." value="${searchQuery}" autocomplete="off">
+            <div class="tag-cloud">
+                ${pageStyles.map(s => `<div class="tag" onclick="quickStyle('${s}')">${s}</div>`).join('')}
+            </div>
+            <div style="display:flex; gap: 20px; margin-top:20px;">
+                <button type="submit" style="background:#fff; border:none; padding:10px 30px; cursor:pointer; font-size:0.7rem; letter-spacing:2px;">SEARCH</button>
+                <button type="button" onclick="window.location='/'" style="background:transparent; border:1px solid #444; color:#fff; padding:10px 30px; cursor:pointer; font-size:0.7rem; letter-spacing:2px;">CLEAR</button>
+                <button type="button" onclick="toggle()" style="background:transparent; border:none; color:#444; cursor:pointer; font-size:0.7rem; letter-spacing:2px;">CLOSE</button>
+            </div>
+        </form>
     </div>
 
     <div class="container">
         <header>
             <h1 onclick="toggle()">WANG-MANSION</h1>
-            <div class="nav-trigger" onclick="toggle()">FILTER / ${pagination.items} ITEMS</div>
+            <div class="nav-trigger" onclick="toggle()">
+                ${searchQuery ? \`RESULTS FOR: "\${searchQuery}"\` : \`ARCHIVE / \${pagination.items} ITEMS\`}
+            </div>
         </header>
 
-        <div class="archive-grid" id="main-grid">
+        <div class="archive-grid">
             ${records.map(r => `
-                <a href="https://www.discogs.com/release/${r.id}" 
-                   class="record" 
-                   target="_blank" 
-                   data-title="${(r.basic_information.title || '').toLowerCase()}" 
-                   data-artist="${(r.basic_information.artists[0].name || '').toLowerCase()}"
-                   data-styles="${(r.basic_information.styles || []).join(',').toLowerCase()}">
+                <a href="https://www.discogs.com/release/${r.id}" class="record" target="_blank">
                     <div class="img-box"><img src="${r.basic_information.cover_image}" loading="lazy"></div>
                     <div class="info">
                         <div class="title">${r.basic_information.title}</div>
@@ -114,34 +141,24 @@ export default {
     </div>
 
     <div class="pagination-bar">
-        <a href="?page=${parseInt(page) - 1}" class="page-link ${page == 1 ? 'disabled' : ''}">BACK</a>
+        <a href="?page=${parseInt(page) - 1}${searchQuery ? '&q=' + searchQuery : ''}" class="page-link ${page == 1 ? 'disabled' : ''}">BACK</a>
         <span class="page-current">${page} / ${pagination.pages}</span>
-        <a href="?page=${parseInt(page) + 1}" class="page-link ${page == pagination.pages ? 'disabled' : ''}">NEXT</a>
+        <a href="?page=${parseInt(page) + 1}${searchQuery ? '&q=' + searchQuery : ''}" class="page-link ${page == pagination.pages ? 'disabled' : ''}">NEXT</a>
     </div>
 
     <script>
         function toggle() { document.getElementById('filter-panel').classList.toggle('open'); }
-        const input = document.getElementById('search-input');
-        const recs = document.querySelectorAll('.record');
-        const tags = document.querySelectorAll('.tag');
-        let activeStyle = 'all';
-
-        function filter() {
-            const val = input.value.toLowerCase();
-            recs.forEach(r => {
-                const mSearch = r.dataset.title.includes(val) || r.dataset.artist.includes(val);
-                const mStyle = activeStyle === 'all' || r.dataset.styles.includes(activeStyle.toLowerCase());
-                r.classList.toggle('hidden', !(mSearch && mStyle));
-            });
+        function quickStyle(s) {
+            document.getElementById('search-input').value = s;
+            document.getElementById('search-form').submit();
         }
-        input.oninput = filter;
-        tags.forEach(t => { 
-            t.onclick = () => { 
-                tags.forEach(x => x.classList.remove('active')); 
-                t.classList.add('active'); 
-                activeStyle = t.dataset.style; 
-                filter(); 
-            }; 
+        // 快捷键支持：按下 / 键直接打开搜索
+        document.addEventListener('keydown', (e) => {
+            if (e.key === '/' && !document.getElementById('filter-panel').classList.contains('open')) {
+                e.preventDefault();
+                toggle();
+                document.getElementById('search-input').focus();
+            }
         });
     </script>
 </body>
