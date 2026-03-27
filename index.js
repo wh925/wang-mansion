@@ -6,7 +6,7 @@ export default {
     
     const page = url.searchParams.get("page") || "1";
     const q = url.searchParams.get("q") || "";
-    const perPage = "40"; 
+    const perPage = "15"; 
 
     if (!discogsToken) {
       return new Response("配置缺失：请在 Cloudflare 后台 Variables 添加 DISCOGS_TOKEN", { status: 500 });
