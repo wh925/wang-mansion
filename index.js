@@ -4,7 +4,7 @@ export default {
     const discogsToken = env.DISCOGS_TOKEN;
     const url = new URL(request.url);
     const page = url.searchParams.get("page") || "1";
-    const perPage = "40"; 
+    const perPage = "20"; 
 
     if (!discogsToken) return new Response("Error: Token Missing", { status: 500 });
 
