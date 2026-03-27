@@ -3,4 +3,7 @@ main = "index.js"
 compatibility_date = "2026-03-27"
 
 [vars]
-# 保持简洁，暂时不需要复杂配置
+# 你的 Discogs 用户名（显示用）
+DISCOGS_USER = "你的用户名" 
+
+# 注意：DISCOGS_TOKEN 建议通过 GitHub Secret 自动注入，不要直接写在这里
