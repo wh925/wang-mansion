@@ -1,15 +1,13 @@
 export default {
   async fetch(request, env) {
-    // 1. 设置变量
-    const discogsUser = "wh925"; // 请在此处替换为你的真实 Discogs 用户名
-    const discogsToken = env.DISCOGS_TOKEN; // 自动读取你的 GitHub Secret
+    const discogsUser = "wh925"; 
+    const discogsToken = env.DISCOGS_TOKEN;
 
-    // 2. 如果缺少 Token，显示提示
     if (!discogsToken) {
-      return new Response("Missing DISCOGS_TOKEN in Environment Variables.", { status: 500 });
+      return new Response("未检测到 DISCOGS_TOKEN，请检查 GitHub Secret 配置。", { status: 500 });
     }
 
-    // 3. 从 API 获取数据 (按添加时间倒序)
+    // 从 Discogs API 获取数据 (按添加时间倒序)
     let records = [];
     try {
       const response = await fetch(`https://api.discogs.com/users/${discogsUser}/collection/folders/0/releases?sort=added&sort_order=desc&per_page=50`, {
@@ -23,144 +21,158 @@ export default {
         records = data.releases;
       }
     } catch (e) {
-      // 错误处理
+      console.error(e);
     }
 
-    // 4. 生成 HTML 结构
     const html = `
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>WANG-MANSION | Record Archive</title>
+    <title>WANG-MANSION | Archives</title>
     <style>
         :root {
-            --bg: #111; /* 极致的深黑背景 */
-            --text-main: #f0f0f0; /* 柔和的白色文字 */
-            --text-muted: #888; /* 灰色元数据 */
-            --accent: #eee; /* 用于线条和强调 */
+            --bg: #0a0a0a; 
+            --text: #e0e0e0;
+            --muted: #666;
+            --line: #222;
         }
         body {
             background-color: var(--bg);
-            color: var(--text-main);
-            font-family: "Georgia", "PingFang SC", "Microsoft YaHei", serif; /* 引入衬线体增强专业感 */
+            color: var(--text);
+            font-family: "Inter", "Georgia", "PingFang SC", serif;
             margin: 0;
-            padding: 80px 40px;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
+            padding: 10vh 5vw;
+            line-height: 1.6;
         }
-        .wrapper {
-            max-width: 1400px;
-            width: 100%;
-        }
+        .container { max-width: 1200px; margin: 0 auto; }
+        
         header {
-            margin-bottom: 100px;
-            text-align: left;
-            border-bottom: 1px solid #333;
-            padding-bottom: 30px;
+            border-bottom: 1px solid var(--line);
+            padding-bottom: 40px;
+            margin-bottom: 80px;
         }
         h1 {
-            font-size: 2.2rem;
-            font-weight: 300;
-            letter-spacing: 12px;
+            font-weight: 200;
+            font-size: 2.5rem;
+            letter-spacing: 0.2em;
             text-transform: uppercase;
             margin: 0;
-            color: var(--text-main);
         }
-        .subtitle {
-            color: var(--text-muted);
-            text-transform: uppercase;
+        .desc {
+            color: var(--muted);
             font-size: 0.75rem;
-            letter-spacing: 5px;
+            letter-spacing: 0.4em;
+            text-transform: uppercase;
             margin-top: 15px;
         }
 
-        /* 核心网格布局 */
+        /* 档案网格：非对称呼吸感 */
         .archive-grid {
             display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-            gap: 50px 30px; /* 大行距，小列距，增强呼吸感 */
+            grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+            gap: 60px 40px;
         }
-        .record-card {
+
+        .record {
             text-decoration: none;
             color: inherit;
-            transition: opacity 0.4s ease;
-            position: relative;
-        }
-        .record-card:hover {
-            opacity: 0.7; /* 优雅的悬停淡出效果 */
+            display: block;
         }
         
-        .cover-wrapper {
-            aspect-ratio: 1 / 1; /* 强制正方形 */
-            background-color: #222;
+        .img-box {
+            aspect-ratio: 1/1;
+            background: #111;
             overflow: hidden;
-            margin-bottom: 25px;
-            border: 1px solid #222; /* 淡淡的边框 */
+            margin-bottom: 20px;
+            transition: transform 0.6s cubic-bezier(0.16, 1, 0.3, 1);
         }
-        .record-cover {
+        .record:hover .img-box {
+            transform: scale(1.02);
+        }
+        
+        img {
             width: 100%;
             height: 100%;
             object-fit: cover;
-            filter: grayscale(1); /* 默认黑白 */
-            transition: filter 0.5s ease;
+            filter: grayscale(1) contrast(1.1);
+            transition: filter 0.8s ease;
         }
-        .record-card:hover .record-cover {
-            filter: grayscale(0); /* 悬停恢复彩色 */
+        .record:hover img {
+            filter: grayscale(0) contrast(1);
         }
 
-        /* 极简排版 */
-        .record-meta {
-            padding-left: 5px;
-        }
+        .info { padding: 0 5px; }
         .title {
-            font-weight: 300;
-            font-size: 1.15rem;
-            margin-bottom: 8px;
-            letter-spacing: 1px;
-            color: var(--text-main);
+            font-size: 1rem;
+            font-weight: 400;
+            margin-bottom: 5px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
         }
         .artist {
-            color: var(--text-muted);
-            font-size: 0.9rem;
+            color: var(--muted);
+            font-size: 0.8rem;
+            letter-spacing: 0.1em;
             text-transform: uppercase;
-            letter-spacing: 2px;
-            margin-bottom: 15px;
         }
-        .cat-info {
-            float: right;
+        .year {
             font-family: monospace;
             font-size: 0.7rem;
-            color: var(--text-muted);
+            color: #333;
+            margin-top: 10px;
+            border-top: 1px solid var(--line);
+            padding-top: 5px;
+            display: inline-block;
         }
 
         footer {
-            margin-top: 120px;
-            font-size: 0.75rem;
-            color: #444;
+            margin-top: 150px;
+            padding-top: 40px;
+            border-top: 1px solid var(--line);
             text-align: center;
-            border-top: 1px solid #222;
-            padding-top: 30px;
-            letter-spacing: 2px;
+            font-size: 0.65rem;
+            letter-spacing: 0.3em;
+            color: #333;
+        }
+
+        @media (max-width: 600px) {
+            h1 { font-size: 1.5rem; }
+            .archive-grid { gap: 30px 20px; }
         }
     </style>
 </head>
 <body>
-    <div class="wrapper">
+    <div class="container">
         <header>
             <h1>WANG-MANSION</h1>
-            <div class="subtitle">DIGITAL RECORD ARCHIVE</div>
+            <div class="desc">Analog & Digital Archive / Beijing</div>
         </header>
         
         <div class="archive-grid">
             ${records.map(r => `
-                <a href="https://www.discogs.com/release/${r.id}" class="record-card" target="_blank">
-                    <div class="cover-wrapper">
-                        <img src="${r.basic_information.cover_image}" class="record-cover" alt="${r.basic_information.title}">
+                <a href="https://www.discogs.com/release/${r.id}" class="record" target="_blank">
+                    <div class="img-box">
+                        <img src="${r.basic_information.cover_image}" loading="lazy">
                     </div>
-                    <div class="record-meta">
+                    <div class="info">
                         <div class="title">${r.basic_information.title}</div>
                         <div class="artist">${r.basic_information.artists[0].name}</div>
-           
+                        <div class="year">REF NO. ${r.id} / ${r.basic_information.year || '----'}</div>
+                    </div>
+                </a>
+            `).join('')}
+        </div>
+
+        <footer>
+            COLLECTION OF WH925 | SINCE 2009 | POWERED BY CLOUDFLARE
+        </footer>
+    </div>
+</body>
+</html>
+    `;
+    return new Response(html, { headers: { "content-type": "text/html;charset=UTF-8" } });
+  },
+};
