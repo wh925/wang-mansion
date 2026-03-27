@@ -1,6 +1,6 @@
 export default {
   async fetch(request, env) {
-    const discogsUser = "wh925"; 
+    const discogsUser = "tangrou"; 
     const discogsToken = env.DISCOGS_TOKEN;
 
     if (!discogsToken) {
