@@ -3,32 +3,23 @@ export default {
     const discogsUser = "tangrou";
     const discogsToken = env.DISCOGS_TOKEN;
     const url = new URL(request.url);
-    
     const page = url.searchParams.get("page") || "1";
-    const q = url.searchParams.get("q") || "";
-    const perPage = "15"; // 调回 15 张，每张都是巨幕感
-
-    if (!discogsToken) return new Response("TOKEN MISSING", { status: 500 });
+    
+    // 每页请求 50 条文字数据（这是安全阈值，不会触碰红线）
+    const perPage = "50"; 
 
     try {
-      // 核心修复：通过 search 接口但强制指定文件夹和用户名
-      let apiUrl;
-      if (q) {
-        // 关键：增加 folder=0 并限定 username，确保只在你的“所有收藏”中搜索
-        apiUrl = `https://api.discogs.com/database/search?q=${encodeURIComponent(q)}&username=${discogsUser}&type=release&per_page=${perPage}&page=${page}`;
-      } else {
-        apiUrl = `https://api.discogs.com/users/${discogsUser}/collection/folders/0/releases?sort=added&sort_order=desc&per_page=${perPage}&page=${page}`;
-      }
+      const apiUrl = `https://api.discogs.com/users/${discogsUser}/collection/folders/0/releases?sort=added&sort_order=desc&per_page=${perPage}&page=${page}`;
 
       const apiResponse = await fetch(apiUrl, {
         headers: {
-          'User-Agent': 'WangMansionArchive/2.2',
+          'User-Agent': 'WangMansionArchive/4.0',
           'Authorization': `Discogs token=${discogsToken}`
         }
       });
       
       const data = await apiResponse.json();
-      const records = q ? data.results : data.releases;
+      const records = data.releases || [];
       const pagination = data.pagination;
 
       const html = `
@@ -39,91 +30,131 @@ export default {
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>WANG-MANSION | ARCHIVE</title>
     <style>
-        :root { --bg: #141414; --text: #f0f0f0; --muted: #555; --line: #222; }
-        body { background-color: var(--bg); color: var(--text); font-family: "Inter", serif; margin: 0; padding: 0; -webkit-font-smoothing: antialiased; }
+        :root { --bg: #111; --text: #eee; --muted: #444; --accent: #ff3e00; }
+        body { background-color: var(--bg); color: var(--text); font-family: "Inter", serif; margin: 0; }
         
+        /* 极简搜索条 */
         #search-panel { 
-            position: fixed; top: -100%; left: 0; width: 100%; background: #1a1a1a; 
-            z-index: 100; transition: 0.6s cubic-bezier(0.16, 1, 0.3, 1); 
-            padding: 100px 10vw; box-sizing: border-box; border-bottom: 1px solid var(--line);
+            position: fixed; top: 0; left: 0; width: 100%; background: rgba(17,17,17,0.95); 
+            backdrop-filter: blur(10px); z-index: 100; transform: translateY(-100%);
+            transition: 0.4s cubic-bezier(0.4, 0, 0.2, 1); padding: 30px 10vw; 
+            border-bottom: 1px solid #222; box-sizing: border-box;
         }
-        #search-panel.open { top: 0; }
-        #q-input { width: 100%; background: transparent; border: none; border-bottom: 2px solid #333; color: #fff; font-size: 2.5rem; outline: none; padding: 15px 0; font-weight: 200; }
+        #search-panel.open { transform: translateY(0); }
+        #local-q { width: 100%; background: transparent; border: none; color: #fff; font-size: 1.8rem; outline: none; font-weight: 200; }
 
-        .container { max-width: 720px; margin: 0 auto; padding: 12vh 8vw 25vh 8vw; }
-        header { border-bottom: 1px solid var(--line); padding-bottom: 60px; margin-bottom: 120px; text-align: center; }
-        h1 { font-weight: 200; letter-spacing: 0.8em; cursor: pointer; margin: 0; font-size: 1.5rem; text-transform: uppercase; }
-        .sub-nav { font-size: 0.6rem; letter-spacing: 5px; color: var(--muted); margin-top: 20px; text-transform: uppercase; cursor: pointer; }
-
-        .grid { display: flex; flex-direction: column; gap: 150px; } 
-        .record { text-decoration: none; color: inherit; display: block; }
-        .img-box { aspect-ratio: 1/1; background: #1a1a1a; overflow: hidden; margin-bottom: 45px; box-shadow: 0 30px 60px rgba(0,0,0,0.5); border: 1px solid rgba(255,255,255,0.02); }
-        img { width: 100%; height: 100%; object-fit: cover; filter: grayscale(0.5) contrast(1.1); transition: 1.2s ease; }
-        .record:hover img { filter: grayscale(0) contrast(1); transform: scale(1.02); }
+        .container { max-width: 650px; margin: 0 auto; padding: 15vh 10vw; }
+        header { text-align: center; margin-bottom: 80px; }
+        h1 { font-weight: 200; letter-spacing: 0.8em; font-size: 1.2rem; cursor: pointer; color: #fff; }
         
-        .info { text-align: center; padding: 0 10%; }
-        .title { font-size: 1.1rem; margin-bottom: 15px; font-weight: 400; line-height: 1.5; color: #fff; letter-spacing: 0.05em; }
-        .artist { color: var(--muted); font-size: 0.8rem; text-transform: uppercase; letter-spacing: 5px; font-weight: 300; }
+        .grid { display: flex; flex-direction: column; gap: 120px; } 
+        .record { text-decoration: none; color: inherit; display: block; }
+        .record.hidden { display: none !important; }
+        
+        /* 图片占位符：防止布局跳动 */
+        .img-box { 
+            aspect-ratio: 1/1; background: #1a1a1a; margin-bottom: 30px; 
+            box-shadow: 0 20px 40px rgba(0,0,0,0.4); overflow: hidden;
+        }
+        img { 
+            width: 100%; height: 100%; object-fit: cover; opacity: 0; 
+            transition: opacity 1s ease; filter: grayscale(0.3);
+        }
+        img.loaded { opacity: 1; }
+        
+        .info { text-align: center; }
+        .title { font-size: 1rem; margin-bottom: 8px; color: #fff; line-height: 1.4; }
+        .artist { color: var(--muted); font-size: 0.7rem; text-transform: uppercase; letter-spacing: 4px; }
 
-        .pagi { position: fixed; bottom: 60px; left: 0; width: 100%; display: flex; justify-content: center; gap: 60px; z-index: 90; }
-        .p-btn { color: #333; text-decoration: none; font-size: 0.65rem; letter-spacing: 4px; transition: 0.3s; }
-        .p-btn:hover { color: #fff; }
-        .p-cur { color: #222; font-size: 0.65rem; }
-        .hide { visibility: hidden; }
+        .pagi { padding: 80px 0; display: flex; justify-content: center; gap: 40px; }
+        .p-btn { color: var(--muted); text-decoration: none; font-size: 0.6rem; letter-spacing: 3px; }
+        .p-btn:hover { color: var(--accent); }
     </style>
 </head>
 <body>
     <div id="search-panel">
-        <form method="GET" action="/">
-            <input type="text" name="q" id="q-input" placeholder="SEARCH COLLECTION..." value="${q}" autocomplete="off">
-            <div style="margin-top:50px; display:flex; gap:30px;">
-                <button type="submit" style="background:#fff; border:none; padding:12px 40px; cursor:pointer; font-size:0.75rem; letter-spacing:2px; font-weight:bold;">CHECK</button>
-                <button type="button" onclick="window.location='/'" style="background:transparent; border:1px solid #444; color:#666; padding:12px 40px; cursor:pointer; font-size:0.75rem;">RESET</button>
-                <button type="button" onclick="toggle()" style="background:transparent; border:none; color:#444; cursor:pointer; font-size:0.75rem;">CLOSE</button>
-            </div>
-        </form>
-    </div>
-
-    <div class="container">
-        <header>
-            <h1 onclick="toggle()">WANG-MANSION</h1>
-            <div class="sub-nav" onclick="toggle()">${q ? 'RESULTS FOR: ' + q : 'COLLECTION / ' + pagination.items + ' ITEMS'}</div>
-        </header>
-        <div class="grid">
-            ${records.map(r => {
-                const title = q ? (r.title.split(' - ')[1] || r.title) : r.basic_information.title;
-                const artist = q ? (r.title.split(' - ')[0] || 'Unknown') : r.basic_information.artists[0].name;
-                const cover = q ? r.cover_image : r.basic_information.cover_image;
-                return `
-                <a href="https://www.discogs.com/release/${r.id}" class="record" target="_blank">
-                    <div class="img-box"><img src="${cover}" loading="lazy"></div>
-                    <div class="info">
-                        <div class="title">${title}</div>
-                        <div class="artist">${artist}</div>
-                    </div>
-                </a>
-                `;
-            }).join('')}
+        <input type="text" id="local-q" placeholder="SEARCH MY ARCHIVE..." autocomplete="off">
+        <div id="status" style="margin-top:15px; color:var(--accent); font-size:0.6rem; letter-spacing:2px; text-transform:uppercase;">
+            Ready to check ${records.length} items
         </div>
     </div>
 
-    <div class="pagi">
-        <a href="?page=${parseInt(page) - 1}${q ? '&q=' + q : ''}" class="p-btn ${page == 1 ? 'hide' : ''}">BACK</a>
-        <span class="p-cur">${page} / ${pagination.pages}</span>
-        <a href="?page=${parseInt(page) + 1}${q ? '&q=' + q : ''}" class="p-btn ${page == pagination.pages ? 'hide' : ''}">NEXT</a>
+    <div class="container">
+        <header onclick="toggleSearch()">
+            <h1>WANG-MANSION</h1>
+            <p style="font-size:0.5rem; color:#333; letter-spacing:4px; margin-top:20px;">TAP TO SEARCH / PAGE ${page}</p>
+        </header>
+        
+        <div class="grid" id="main-grid">
+            ${records.map(r => `
+                <a href="https://www.discogs.com/release/${r.id}" 
+                   class="record" 
+                   target="_blank"
+                   data-search="${(r.basic_information.title + ' ' + r.basic_information.artists[0].name).toLowerCase()}">
+                    <div class="img-box">
+                        <img data-src="${r.basic_information.cover_image}" class="lazy-img">
+                    </div>
+                    <div class="info">
+                        <div class="title">${r.basic_information.title}</div>
+                        <div class="artist">${r.basic_information.artists[0].name}</div>
+                    </div>
+                </a>
+            `).join('')}
+        </div>
+
+        <div class="pagi">
+            <a href="?page=${parseInt(page) - 1}" class="p-btn ${page == 1 ? 'hidden' : ''}">PREV BATCH</a>
+            <a href="?page=${parseInt(page) + 1}" class="p-btn ${page == pagination.pages ? 'hidden' : ''}">NEXT BATCH</a>
+        </div>
     </div>
 
     <script>
-        function toggle() { document.getElementById('search-panel').classList.toggle('open'); }
-        document.addEventListener('keydown', (e) => {
-            if (e.key === '/') { e.preventDefault(); toggle(); document.getElementById('q-input').focus(); }
+        function toggleSearch() { 
+            const p = document.getElementById('search-panel');
+            p.classList.toggle('open');
+            if(p.classList.contains('open')) document.getElementById('local-q').focus();
+        }
+        
+        // 核心 1：懒加载图片逻辑（Intersection Observer）
+        const observer = new IntersectionObserver((entries) => {
+            entries.forEach(entry => {
+                if (entry.isIntersecting) {
+                    const img = entry.target;
+                    img.src = img.dataset.src;
+                    img.onload = () => img.classList.add('loaded');
+                    observer.unobserve(img);
+                }
+            });
+        }, { rootMargin: '200px' }); // 提前 200px 开始加载
+
+        document.querySelectorAll('.lazy-img').forEach(img => observer.observe(img));
+
+        // 核心 2：本地极速查重
+        const searchInput = document.getElementById('local-q');
+        const statusText = document.getElementById('status');
+        const records = document.querySelectorAll('.record');
+
+        searchInput.addEventListener('input', (e) => {
+            const val = e.target.value.toLowerCase().trim();
+            let count = 0;
+            records.forEach(r => {
+                const match = r.getAttribute('data-search').includes(val);
+                r.classList.toggle('hidden', !match);
+                if(match && val !== "") count++;
+            });
+            statusText.innerText = val === "" ? "Ready to check" : "Found " + count + " Matches in this batch";
+        });
+
+        document.addEventListener('keydown', e => { 
+            if(e.key === '/') { e.preventDefault(); toggleSearch(); }
+            if(e.key === 'Escape') document.getElementById('search-panel').classList.remove('open');
         });
     </script>
 </body>
 </html>`;
       return new Response(html, { headers: { "content-type": "text/html;charset=UTF-8" } });
     } catch (e) {
-      return new Response("System Error: " + e.message, { status: 500 });
+      return new Response("System Overload: " + e.message, { status: 500 });
     }
   }
 };
