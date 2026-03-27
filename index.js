@@ -4,7 +4,7 @@ export default {
     const discogsToken = env.DISCOGS_TOKEN;
 
     try {
-      const apiResponse = await fetch(`https://api.discogs.com/users/${discogsUser}/collection/folders/0/releases?sort=added&sort_order=desc&per_page=100`, {
+      const apiResponse = await fetch(`https://api.discogs.com/users/${discogsUser}/collection/folders/0/releases?sort=added&sort_order=desc&per_page=50`, {
         headers: {
           'User-Agent': 'WangMansionArchive/1.1',
           'Authorization': `Discogs token=${discogsToken}`
