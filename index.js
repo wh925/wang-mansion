@@ -6,7 +6,7 @@ export default {
     
     const page = url.searchParams.get("page") || "1";
     const q = url.searchParams.get("q") || "";
-    const perPage = "40"; 
+    const perPage = "15"; 
 
     try {
       // 构建请求：如果用户输入了搜索词，我们直接请求 API 的搜索功能
