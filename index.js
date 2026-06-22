@@ -5,7 +5,7 @@ export default {
     const url = new URL(request.url);
 
     // ==========================================
-    // 功能一：图片中转代理（解决国内及成都朋友看不到图片的问题）
+    // 功能一：强力缓存型图片代理（不再频繁骚扰 Discogs）
     // ==========================================
     if (url.pathname.startsWith('/proxy-img/')) {
       const targetUrl = decodeURIComponent(url.pathname.replace('/proxy-img/', ''));
@@ -13,14 +13,22 @@ export default {
         return new Response("Invalid Image URL", { status: 400 });
       }
       try {
+        // 核心优化：利用 cf 参数强制 Cloudflare 把图片存进自己的服务器
         const imgRes = await fetch(targetUrl, {
-          headers: { 'User-Agent': 'WangMansionArchive/ImageProxy' }
-        });
-        return new Response(imgRes.body, {
-          headers: { 
-            'content-type': imgRes.headers.get('content-type') || 'image/jpeg',
-            'cache-control': 'public, max-age=86400' // 让图片在 Cloudflare 缓存一天，省流量且加速
+          headers: { 'User-Agent': 'WangMansionArchive/ImageProxy' },
+          cf: {
+            cacheEverything: true, // 缓存所有内容
+            cacheTtl: 86400        // 缓存 24 小时（一天内相同的碟不需要再向 Discogs 拿图）
           }
+        });
+        
+        // 复制一份响应并带上缓存头返给浏览器
+        const newHeaders = new Headers(imgRes.headers);
+        newHeaders.set('cache-control', 'public, max-age=86400');
+        
+        return new Response(imgRes.body, {
+          status: imgRes.status,
+          headers: newHeaders
         });
       } catch (err) {
         return new Response("Proxy Fetch Error", { status: 500 });
@@ -31,7 +39,7 @@ export default {
     // 常规主页逻辑
     // ==========================================
     const page = url.searchParams.get("page") || "1";
-    const perPage = "25"; // 调回稳妥的 25 张，兼顾单列阔气感与接口安全
+    const perPage = "15"; // 调回最黄金、舒服的 15 张，既大气又安全
 
     if (!discogsToken) return new Response("TOKEN MISSING", { status: 500 });
 
@@ -40,17 +48,14 @@ export default {
 
       const apiResponse = await fetch(apiUrl, {
         headers: {
-          'User-Agent': 'WangMansionArchive/4.5',
+          'User-Agent': 'WangMansionArchive/5.0',
           'Authorization': `Discogs token=${discogsToken}`
         }
       });
       
-      // ==========================================
-      // 功能二：核心修复！拦截非 200 响应，防止 JSON 解析崩溃
-      // ==========================================
       if (!apiResponse.ok) {
         const errText = await apiResponse.text();
-        return new Response(`Discogs 接口返回错误 (状态码: ${apiResponse.status})。通常是由于短时间内查重刷新太快，触发了官方频率锁。请等几分钟再试。详情: ${errText}`, { status: apiResponse.status });
+        return new Response(`Discogs 接口返回错误 (状态码: ${apiResponse.status})。通常是由于短时间内查重刷新太快，触发了官方频率锁。请等一分钟计数器重置再试。`, { status: apiResponse.status });
       }
 
       const data = await apiResponse.json();
