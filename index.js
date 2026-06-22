@@ -25,7 +25,7 @@ export default {
     }
 
     // ==========================================
-    // 2. 强力缓存窗（由于全量抓取请求变多，调整为1小时免刷，死死护住系统）
+    // 2. 缓存守护（30分钟自动更新，死死护住接口）
     // ==========================================
     const cache = caches.default;
     const cachedResponse = await cache.match(request);
@@ -37,62 +37,52 @@ export default {
 
     try {
       // ==========================================
-      // 3. 核心：全自动多页并发大扫盘
+      // 3. 核心升级：顺序迭代扫盘（拒绝并发，杜绝 429 漏网）
       // ==========================================
-      // 先抓第一页（每页100条极限），顺便探查总页数
       const firstPageUrl = `https://api.discogs.com/users/${discogsUser}/collection/folders/0/releases?sort=added&sort_order=desc&per_page=100&page=1`;
       
       const firstResponse = await fetch(firstPageUrl, {
         headers: {
-          'User-Agent': 'WangMansionArchive/11.0',
+          'User-Agent': 'WangMansionArchive/12.0',
           'Authorization': `Discogs token=${discogsToken}`
         }
       });
       
       if (!firstResponse.ok) {
-        return new Response(`Discogs 官方接口正忙，请一分钟后刷新重试。`, { status: firstResponse.status });
+        if (firstResponse.status === 429) {
+          return new Response(`Discogs 官方判定短时间内刷新太快（429），请等一分钟再试。`, { status: 429 });
+        }
+        return new Response(`Discogs 官方接口正忙，请稍后刷新重试。`, { status: firstResponse.status });
       }
 
       const firstData = await firstResponse.json();
       let records = firstData.releases || [];
       const totalPages = firstData.pagination?.pages || 1;
 
-      // 如果发现还有更多页，立刻启动多线程并发扫盘，把藏碟一网打尽（最大支持并发抓取20页，即2000张碟）
+      // 改用 sequential for 循环，一页页老实往下拉，规避并发激发的频率锁
       if (totalPages > 1) {
-        const pagesToFetch = [];
-        const maxPages = Math.min(totalPages, 20); 
+        const maxPages = Math.min(totalPages, 20); // 最大支持 2000 张珍藏
         for (let p = 2; p <= maxPages; p++) {
-          pagesToFetch.push(p);
-        }
-
-        // 并发轰炸抓取
-        const promises = pagesToFetch.map(async (p) => {
-          try {
-            const pUrl = `https://api.discogs.com/users/${discogsUser}/collection/folders/0/releases?sort=added&sort_order=desc&per_page=100&page=${p}`;
-            const res = await fetch(pUrl, {
-              headers: {
-                'User-Agent': 'WangMansionArchive/11.0',
-                'Authorization': `Discogs token=${discogsToken}`
-              }
-            });
-            if (res.ok) {
-              const d = await res.json();
-              return d.releases || [];
+          const pUrl = `https://api.discogs.com/users/${discogsUser}/collection/folders/0/releases?sort=added&sort_order=desc&per_page=100&page=${p}`;
+          const res = await fetch(pUrl, {
+            headers: {
+              'User-Agent': 'WangMansionArchive/12.0',
+              'Authorization': `Discogs token=${discogsToken}`
             }
-          } catch (err) {
-            // 单页如果偶尔抽风，返回空数组容错，不至于让整个网页崩溃
+          });
+          
+          if (res.ok) {
+            const d = await res.json();
+            if (d.releases && d.releases.length > 0) {
+              records = records.concat(d.releases);
+            }
+          } else if (res.status === 429) {
+            // 如果中途被拦截，直接硬核报错，绝不含糊地只吐出 100 张糊弄人
+            return new Response(`同步全量时，在第 ${p} 页触发了官方频率锁(429)，请一分钟后重试。`, { status: 429 });
           }
-          return [];
-        });
-
-        // 融汇长龙
-        const allPagesResults = await Promise.all(promises);
-        allPagesResults.forEach(pRecords => {
-          records = records.concat(pRecords);
-        });
+        }
       }
 
-      // 拿回你最新买的那张碟作为微信小卡片封面
       const firstCover = records[0]?.basic_information?.cover_image || '';
       const shareImageUrl = firstCover ? `https://${url.hostname}/proxy-img/${encodeURIComponent(firstCover)}` : '';
 
@@ -242,7 +232,7 @@ export default {
       const response = new Response(html, {
         headers: { 
           "content-type": "text/html;charset=UTF-8",
-          "Cache-Control": "public, max-age=3600" // 边缘缓存1小时，极大提升全量加载速度
+          "Cache-Control": "public, max-age=1800" // 严守 30 分钟强力同步
         }
       });
 
