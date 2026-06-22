@@ -5,7 +5,7 @@ export default {
     const url = new URL(request.url);
 
     // ==========================================
-    // 1. 图片代理（依然保持强力边缘缓存，不折腾 Discogs）
+    // 1. 图片代理（带边缘缓存）
     // ==========================================
     if (url.pathname.startsWith('/proxy-img/')) {
       const targetUrl = decodeURIComponent(url.pathname.replace('/proxy-img/', ''));
@@ -14,7 +14,7 @@ export default {
       try {
         const imgRes = await fetch(targetUrl, {
           headers: { 'User-Agent': 'WangMansionArchive/Proxy' },
-          cf: { cacheEverything: true, cacheTtl: 604800 } // 图片缓存 7 天
+          cf: { cacheEverything: true, cacheTtl: 604800 } 
         });
         const newHeaders = new Headers(imgRes.headers);
         newHeaders.set('cache-control', 'public, max-age=604800');
@@ -25,19 +25,16 @@ export default {
     }
 
     // ==========================================
-    // 2. 核心：全自动智能时间窗缓存（告别手动尾巴）
+    // 2. 智能缓存窗 
     // ==========================================
     const cache = caches.default;
-    
-    // 尝试在 Cloudflare 缓存里捞现成的网页
     const cachedResponse = await cache.match(request);
     if (cachedResponse) {
-      // 捞到了直接给用户看，秒开，0% 概率触发 429
       return cachedResponse;
     }
 
     // ==========================================
-    // 3. 缓存过期了，或者第一次访问，全自动去 Discogs 同步
+    // 3. 抓取 Discogs 数据
     // ==========================================
     const page = url.searchParams.get("page") || "1";
     const perPage = "15"; 
@@ -49,12 +46,11 @@ export default {
 
       const apiResponse = await fetch(apiUrl, {
         headers: {
-          'User-Agent': 'WangMansionArchive/7.0',
+          'User-Agent': 'WangMansionArchive/8.0',
           'Authorization': `Discogs token=${discogsToken}`
         }
       });
       
-      // 如果刚好撞上 Discogs 抽风或封锁，安全降级，防止页面死掉
       if (!apiResponse.ok) {
         return new Response(`Discogs 接口正忙，请一分钟后刷新全自动同步。`, { status: apiResponse.status });
       }
@@ -63,6 +59,10 @@ export default {
       const records = data.releases || [];
       const pagination = data.pagination;
 
+      // 【核心新增】：提取你最新添加的第一张唱片封面，作为微信分享的封面图
+      const firstCover = records[0]?.basic_information?.cover_image || '';
+      const shareImageUrl = firstCover ? `https://${url.hostname}/proxy-img/${encodeURIComponent(firstCover)}` : '';
+
       const html = `
 <!DOCTYPE html>
 <html>
@@ -70,6 +70,13 @@ export default {
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>WANG-MANSION</title>
+    
+    <!-- 核心修改：专门喂给微信和社交平台的分享暗号标签 -->
+    <meta property="og:type" content="website">
+    <meta property="og:title" content="WANG-MANSION">
+    <meta property="og:description" content="PRIVATE MUSIC ARCHIVE">
+    <meta property="og:image" content="${shareImageUrl}">
+    
     <style>
         :root { --bg: #141414; --text: #f0f0f0; --muted: #444; --accent: #ff3e00; }
         body { background-color: var(--bg); color: var(--text); font-family: "Inter", serif; margin: 0; }
@@ -95,6 +102,9 @@ export default {
     </style>
 </head>
 <body>
+    <!-- 核心修改：在页面最顶部塞一个微信机器人能直接秒读的隐藏图（双重保险） -->
+    <div style="display:none;"><img src="${shareImageUrl}" alt="Cover"></div>
+
     <div id="search-panel">
         <input type="text" id="local-q" placeholder="输入艺人或碟名查重..." autocomplete="off">
         <div id="status" style="margin-top:15px; color:var(--accent); font-size:0.65rem; letter-spacing:2px;">READY TO CHECK ${records.length} ITEMS</div>
@@ -150,7 +160,6 @@ export default {
 </body>
 </html>`;
 
-      // 【核心修改】设置这个网页在 Cloudflare 里的生存时间为 1800 秒（30分钟）
       const response = new Response(html, {
         headers: { 
           "content-type": "text/html;charset=UTF-8",
@@ -158,7 +167,6 @@ export default {
         }
       });
 
-      // 自动存入缓存
       ctx.waitUntil(cache.put(request, response.clone()));
       return response;
 
