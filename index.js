@@ -241,12 +241,14 @@ export default {
 </body>
 </html>`;
 
-      const response = new Response(html, {
-        headers: { 
-          "content-type": "text/html;charset=UTF-8",
-          "Cache-Control": "public, max-age=1800" 
-        }
-      });
+     const response = new Response(html, {
+  headers: { 
+    "content-type": "text/html;charset=UTF-8",
+    // 告诉浏览器：每次访问都要来问问 Cloudflare，别自己瞎缓存
+    "Cache-Control": "no-cache, must-revalidate" 
+  }
+});
+
 
       ctx.waitUntil(cache.put(request, response.clone()));
       return response;
