@@ -37,13 +37,13 @@ export default {
 
     try {
       // ==========================================
-      // 3. 核心升级：顺序迭代扫盘（拒绝并发，杜绝 429 漏网）
+      // 3. 顺序迭代扫盘
       // ==========================================
       const firstPageUrl = `https://api.discogs.com/users/${discogsUser}/collection/folders/0/releases?sort=added&sort_order=desc&per_page=100&page=1`;
       
       const firstResponse = await fetch(firstPageUrl, {
         headers: {
-          'User-Agent': 'WangMansionArchive/12.0',
+          'User-Agent': 'WangMansionArchive/13.0',
           'Authorization': `Discogs token=${discogsToken}`
         }
       });
@@ -59,14 +59,13 @@ export default {
       let records = firstData.releases || [];
       const totalPages = firstData.pagination?.pages || 1;
 
-      // 改用 sequential for 循环，一页页老实往下拉，规避并发激发的频率锁
       if (totalPages > 1) {
-        const maxPages = Math.min(totalPages, 20); // 最大支持 2000 张珍藏
+        const maxPages = Math.min(totalPages, 20); 
         for (let p = 2; p <= maxPages; p++) {
           const pUrl = `https://api.discogs.com/users/${discogsUser}/collection/folders/0/releases?sort=added&sort_order=desc&per_page=100&page=${p}`;
           const res = await fetch(pUrl, {
             headers: {
-              'User-Agent': 'WangMansionArchive/12.0',
+              'User-Agent': 'WangMansionArchive/13.0',
               'Authorization': `Discogs token=${discogsToken}`
             }
           });
@@ -77,12 +76,12 @@ export default {
               records = records.concat(d.releases);
             }
           } else if (res.status === 429) {
-            // 如果中途被拦截，直接硬核报错，绝不含糊地只吐出 100 张糊弄人
             return new Response(`同步全量时，在第 ${p} 页触发了官方频率锁(429)，请一分钟后重试。`, { status: 429 });
           }
         }
       }
 
+      // 提取最新一张唱片作为微信卡片封面
       const firstCover = records[0]?.basic_information?.cover_image || '';
       const shareImageUrl = firstCover ? `https://${url.hostname}/proxy-img/${encodeURIComponent(firstCover)}` : '';
 
@@ -127,7 +126,8 @@ export default {
     </style>
 </head>
 <body>
-    <div style="display:none;"><img src="${shareImageUrl}" alt="Cover"></div>
+    <!-- 【终极修改】：扔到屏幕外一万像素，保持可见尺寸与状态，瞒过微信爬虫且不留视觉痕迹 -->
+    <img src="${shareImageUrl}" style="position: absolute; width: 350px; height: 350px; left: -9999px; top: -9999px; opacity: 0.01; pointer-events: none;" alt="WeChat-Share-Cover">
 
     <div id="search-panel">
         <input type="text" id="local-q" placeholder="输入艺人或碟名查重..." autocomplete="off">
@@ -232,7 +232,7 @@ export default {
       const response = new Response(html, {
         headers: { 
           "content-type": "text/html;charset=UTF-8",
-          "Cache-Control": "public, max-age=1800" // 严守 30 分钟强力同步
+          "Cache-Control": "public, max-age=1800" 
         }
       });
 
