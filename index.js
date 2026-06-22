@@ -5,7 +5,7 @@ export default {
     const url = new URL(request.url);
 
     // ==========================================
-    // 1. 图片代理（带边缘缓存）
+    // 1. 图片代理（带边缘缓存，确保国内稳定出大图）
     // ==========================================
     if (url.pathname.startsWith('/proxy-img/')) {
       const targetUrl = decodeURIComponent(url.pathname.replace('/proxy-img/', ''));
@@ -25,7 +25,7 @@ export default {
     }
 
     // ==========================================
-    // 2. 智能缓存窗 
+    // 2. 强力缓存窗（由于全量抓取请求变多，调整为1小时免刷，死死护住系统）
     // ==========================================
     const cache = caches.default;
     const cachedResponse = await cache.match(request);
@@ -33,36 +33,72 @@ export default {
       return cachedResponse;
     }
 
-    // ==========================================
-    // 3. 抓取 Discogs 数据
-    // ==========================================
-    const page = url.searchParams.get("page") || "1";
-    const perPage = "15"; 
-
     if (!discogsToken) return new Response("TOKEN MISSING", { status: 500 });
 
     try {
-      const apiUrl = `https://api.discogs.com/users/${discogsUser}/collection/folders/0/releases?sort=added&sort_order=desc&per_page=${perPage}&page=${page}`;
-
-      const apiResponse = await fetch(apiUrl, {
+      // ==========================================
+      // 3. 核心：全自动多页并发大扫盘
+      // ==========================================
+      // 先抓第一页（每页100条极限），顺便探查总页数
+      const firstPageUrl = `https://api.discogs.com/users/${discogsUser}/collection/folders/0/releases?sort=added&sort_order=desc&per_page=100&page=1`;
+      
+      const firstResponse = await fetch(firstPageUrl, {
         headers: {
-          'User-Agent': 'WangMansionArchive/8.0',
+          'User-Agent': 'WangMansionArchive/11.0',
           'Authorization': `Discogs token=${discogsToken}`
         }
       });
       
-      if (!apiResponse.ok) {
-        return new Response(`Discogs 接口正忙，请一分钟后刷新全自动同步。`, { status: apiResponse.status });
+      if (!firstResponse.ok) {
+        return new Response(`Discogs 官方接口正忙，请一分钟后刷新重试。`, { status: firstResponse.status });
       }
 
-      const data = await apiResponse.json();
-      const records = data.releases || [];
-      const pagination = data.pagination;
+      const firstData = await firstResponse.json();
+      let records = firstData.releases || [];
+      const totalPages = firstData.pagination?.pages || 1;
 
-      // 【核心新增】：提取你最新添加的第一张唱片封面，作为微信分享的封面图
+      // 如果发现还有更多页，立刻启动多线程并发扫盘，把藏碟一网打尽（最大支持并发抓取20页，即2000张碟）
+      if (totalPages > 1) {
+        const pagesToFetch = [];
+        const maxPages = Math.min(totalPages, 20); 
+        for (let p = 2; p <= maxPages; p++) {
+          pagesToFetch.push(p);
+        }
+
+        // 并发轰炸抓取
+        const promises = pagesToFetch.map(async (p) => {
+          try {
+            const pUrl = `https://api.discogs.com/users/${discogsUser}/collection/folders/0/releases?sort=added&sort_order=desc&per_page=100&page=${p}`;
+            const res = await fetch(pUrl, {
+              headers: {
+                'User-Agent': 'WangMansionArchive/11.0',
+                'Authorization': `Discogs token=${discogsToken}`
+              }
+            });
+            if (res.ok) {
+              const d = await res.json();
+              return d.releases || [];
+            }
+          } catch (err) {
+            // 单页如果偶尔抽风，返回空数组容错，不至于让整个网页崩溃
+          }
+          return [];
+        });
+
+        // 融汇长龙
+        const allPagesResults = await Promise.all(promises);
+        allPagesResults.forEach(pRecords => {
+          records = records.concat(pRecords);
+        });
+      }
+
+      // 拿回你最新买的那张碟作为微信小卡片封面
       const firstCover = records[0]?.basic_information?.cover_image || '';
       const shareImageUrl = firstCover ? `https://${url.hostname}/proxy-img/${encodeURIComponent(firstCover)}` : '';
 
+      // ==========================================
+      // 4. 前端高冷切片渲染
+      // ==========================================
       const html = `
 <!DOCTYPE html>
 <html>
@@ -71,7 +107,6 @@ export default {
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>WANG-MANSION</title>
     
-    <!-- 核心修改：专门喂给微信和社交平台的分享暗号标签 -->
     <meta property="og:type" content="website">
     <meta property="og:title" content="WANG-MANSION">
     <meta property="og:description" content="PRIVATE MUSIC ARCHIVE">
@@ -95,26 +130,25 @@ export default {
         .info { text-align: center; }
         .title { font-size: 1.05rem; margin-bottom: 10px; color: #fff; line-height: 1.5; }
         .artist { color: var(--muted); font-size: 0.75rem; text-transform: uppercase; letter-spacing: 4px; }
-        .pagi { padding: 60px 0 0 0; display: flex; justify-content: center; gap: 40px; }
-        .p-btn { color: #333; text-decoration: none; font-size: 0.65rem; letter-spacing: 3px; }
+        
+        .pagi { padding: 60px 0 0 0; display: flex; justify-content: center; gap: 40px; align-items: center; }
+        .p-btn { color: #333; text-decoration: none; font-size: 0.65rem; letter-spacing: 3px; cursor: pointer; user-select: none; }
         .p-btn:hover { color: #fff; }
-        .hidden { display: none; }
     </style>
 </head>
 <body>
-    <!-- 核心修改：在页面最顶部塞一个微信机器人能直接秒读的隐藏图（双重保险） -->
     <div style="display:none;"><img src="${shareImageUrl}" alt="Cover"></div>
 
     <div id="search-panel">
         <input type="text" id="local-q" placeholder="输入艺人或碟名查重..." autocomplete="off">
-        <div id="status" style="margin-top:15px; color:var(--accent); font-size:0.65rem; letter-spacing:2px;">READY TO CHECK ${records.length} ITEMS</div>
+        <div id="status" style="margin-top:15px; color:var(--accent); font-size:0.65rem; letter-spacing:2px;">READY TO CHECK ALL ${records.length} ITEMS</div>
     </div>
 
     <div class="container">
         <header onclick="toggleSearch()">
             <h1>WANG-MANSION</h1>
             <p style="font-size:0.55rem; color:#444; letter-spacing:4px; margin-top:20px; cursor:pointer;">
-                🤖 AUTOMATICALLY SYNCED / PAGE ${page}
+                🤖 TOTAL ARCHIVED: ${records.length} DISCS / CLICK TO SEARCH
             </p>
         </header>
         
@@ -130,32 +164,77 @@ export default {
             `).join('')}
         </div>
 
-        <div class="pagi">
-            <a href="?page=${parseInt(page) - 1}" class="p-btn ${page == 1 ? 'hidden' : ''}">BACK</a>
-            <span style="color:#222; font-size:0.65rem;">${page} / ${pagination.pages}</span>
-            <a href="?page=${parseInt(page) + 1}" class="p-btn ${page == pagination.pages ? 'hidden' : ''}">NEXT</a>
+        <div class="pagi" id="pagi-nav">
+            <span id="back-btn" class="p-btn">BACK</span>
+            <span id="sub-page-text" style="color:#222; font-size:0.65rem; letter-spacing: 2px;">1 / 1</span>
+            <span id="next-btn" class="p-btn">NEXT</span>
         </div>
     </div>
 
     <script>
         function toggleSearch() { const p = document.getElementById('search-panel'); p.classList.toggle('open'); if(p.classList.contains('open')) document.getElementById('local-q').focus(); }
-        const observer = new IntersectionObserver((entries) => { entries.forEach(entry => { if (entry.isIntersecting) { const img = entry.target; img.src = img.dataset.src; img.onload = () => img.classList.add('loaded'); observer.unobserve(img); } }); }, { rootMargin: '300px' });
-        document.querySelectorAll('.lazy-img').forEach(img => observer.observe(img));
         
+        const observer = new IntersectionObserver((entries) => { entries.forEach(entry => { if (entry.isIntersecting) { const img = entry.target; img.src = img.dataset.src; img.onload = () => img.classList.add('loaded'); observer.unobserve(img); } }); }, { rootMargin: '600px' });
+        
+        const itemsPerPage = 15; 
+        let currentSubPage = 1;
+        const records = Array.from(document.querySelectorAll('.record'));
+        const totalItems = records.length;
+        const totalSubPages = Math.ceil(totalItems / itemsPerPage);
+
+        function updateGalleryView() {
+            const query = searchInput.value.toLowerCase().trim();
+            const pagiNav = document.getElementById('pagi-nav');
+            const subPageText = document.getElementById('sub-page-text');
+            const backBtn = document.getElementById('back-btn');
+            const nextBtn = document.getElementById('next-btn');
+
+            if (query === "") {
+                pagiNav.style.display = "flex";
+                const start = (currentSubPage - 1) * itemsPerPage;
+                const end = start + itemsPerPage;
+                
+                records.forEach((r, index) => {
+                    if (index >= start && index < end) {
+                        r.classList.remove('hidden');
+                        const img = r.querySelector('.lazy-img');
+                        if (img && !img.classList.contains('loaded')) observer.observe(img);
+                    } else {
+                        r.classList.add('hidden');
+                    }
+                });
+                
+                subPageText.innerText = currentSubPage + " / " + totalSubPages;
+                backBtn.style.color = currentSubPage === 1 ? "#222" : "#333";
+                backBtn.style.pointerEvents = currentSubPage === 1 ? "none" : "auto";
+                nextBtn.style.color = currentSubPage === totalSubPages ? "#222" : "#333";
+                nextBtn.style.pointerEvents = currentSubPage === totalSubPages ? "none" : "auto";
+            } else {
+                pagiNav.style.display = "none"; 
+                let count = 0;
+                records.forEach(r => {
+                    const match = r.getAttribute('data-search').includes(query);
+                    r.classList.toggle('hidden', !match);
+                    if (match) {
+                        count++;
+                        const img = r.querySelector('.lazy-img');
+                        if (img && !img.classList.contains('loaded')) observer.observe(img);
+                    }
+                });
+                statusText.innerText = "FOUND " + count + " IN ALL " + totalItems + " COLLECTION ITEMS";
+            }
+        }
+
         const searchInput = document.getElementById('local-q');
         const statusText = document.getElementById('status');
-        const records = document.querySelectorAll('.record');
-        searchInput.addEventListener('input', (e) => {
-            const val = e.target.value.toLowerCase().trim();
-            let count = 0;
-            records.forEach(r => {
-                const match = r.getAttribute('data-search').includes(val);
-                r.classList.toggle('hidden', !match);
-                if(match && val !== "") count++;
-            });
-            statusText.innerText = val === "" ? "Ready to check" : "Found " + count + " In This Batch";
-        });
+        searchInput.addEventListener('input', updateGalleryView);
+
+        document.getElementById('back-btn').addEventListener('click', () => { if (currentSubPage > 1) { currentSubPage--; updateGalleryView(); window.scrollTo(0,0); } });
+        document.getElementById('next-btn').addEventListener('click', () => { if (currentSubPage < totalSubPages) { currentSubPage++; updateGalleryView(); window.scrollTo(0,0); } });
+
         document.addEventListener('keydown', e => { if(e.key === '/') { e.preventDefault(); toggleSearch(); } });
+        
+        updateGalleryView();
     </script>
 </body>
 </html>`;
@@ -163,7 +242,7 @@ export default {
       const response = new Response(html, {
         headers: { 
           "content-type": "text/html;charset=UTF-8",
-          "Cache-Control": "public, max-age=1800" 
+          "Cache-Control": "public, max-age=3600" // 边缘缓存1小时，极大提升全量加载速度
         }
       });
 
