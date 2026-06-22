@@ -25,9 +25,9 @@ export default {
     }
 
     // ==========================================
-    // 2. 缓存守护（30分钟自动更新，死死护住接口）
+    // 2. 缓存守护（升级为 v4 独立库，彻底洗掉 100 张的僵尸缓存）
     // ==========================================
-    const cache = caches.default;
+    const cache = await caches.open('wangmansion-v4'); 
     const cachedResponse = await cache.match(request);
     if (cachedResponse) {
       return cachedResponse;
@@ -37,13 +37,13 @@ export default {
 
     try {
       // ==========================================
-      // 3. 顺序迭代扫盘
+      // 3. 并发全量扫盘（Promise.all 榨干接口，绝不漏掉一页）
       // ==========================================
       const firstPageUrl = `https://api.discogs.com/users/${discogsUser}/collection/folders/0/releases?sort=added&sort_order=desc&per_page=100&page=1`;
       
       const firstResponse = await fetch(firstPageUrl, {
         headers: {
-          'User-Agent': 'WangMansionArchive/13.0',
+          'User-Agent': 'WangMansionArchive/15.0',
           'Authorization': `Discogs token=${discogsToken}`
         }
       });
@@ -52,32 +52,45 @@ export default {
         if (firstResponse.status === 429) {
           return new Response(`Discogs 官方判定短时间内刷新太快（429），请等一分钟再试。`, { status: 429 });
         }
-        return new Response(`Discogs 官方接口正忙，请稍后刷新重试。`, { status: firstResponse.status });
+        return new Response(`Discogs 官方接口正忙，请稍后刷新重试。状态码: ${firstResponse.status}`, { status: firstResponse.status });
       }
 
       const firstData = await firstResponse.json();
       let records = firstData.releases || [];
       const totalPages = firstData.pagination?.pages || 1;
 
+      // 如果总页数大于 1，立即启动“全页码多线程并发拉取”
       if (totalPages > 1) {
-        const maxPages = Math.min(totalPages, 20); 
+        const pagePromises = [];
+        const maxPages = Math.min(totalPages, 25); // 安全上限 2500 张盘，防止 Worker 内存溢出
+        
         for (let p = 2; p <= maxPages; p++) {
           const pUrl = `https://api.discogs.com/users/${discogsUser}/collection/folders/0/releases?sort=added&sort_order=desc&per_page=100&page=${p}`;
-          const res = await fetch(pUrl, {
-            headers: {
-              'User-Agent': 'WangMansionArchive/13.0',
-              'Authorization': `Discogs token=${discogsToken}`
-            }
-          });
-          
-          if (res.ok) {
-            const d = await res.json();
+          pagePromises.push(
+            fetch(pUrl, {
+              headers: {
+                'User-Agent': 'WangMansionArchive/15.0',
+                'Authorization': `Discogs token=${discogsToken}`
+              }
+            }).then(async (res) => {
+              if (!res.ok) {
+                throw new Error(`第 ${p} 页全量拉取失败，官方状态码: ${res.status}`);
+              }
+              return res.json();
+            })
+          );
+        }
+        
+        try {
+          // 所有页面同时开火抓取
+          const pagesData = await Promise.all(pagePromises);
+          for (const d of pagesData) {
             if (d.releases && d.releases.length > 0) {
               records = records.concat(d.releases);
             }
-          } else if (res.status === 429) {
-            return new Response(`同步全量时，在第 ${p} 页触发了官方频率锁(429)，请一分钟后重试。`, { status: 429 });
           }
+        } catch (loopError) {
+          return new Response(`全量同步中断: ${loopError.message}。请稍后刷新重试。`, { status: 500 });
         }
       }
 
@@ -86,7 +99,7 @@ export default {
       const shareImageUrl = firstCover ? `https://${url.hostname}/proxy-img/${encodeURIComponent(firstCover)}` : '';
 
       // ==========================================
-      // 4. 前端高冷切片渲染
+      // 4. 前端高冷切片渲染（依然保持前端一页显示 15 张，丝滑翻页）
       // ==========================================
       const html = `
 <!DOCTYPE html>
@@ -126,7 +139,6 @@ export default {
     </style>
 </head>
 <body>
-    <!-- 【终极修改】：扔到屏幕外一万像素，保持可见尺寸与状态，瞒过微信爬虫且不留视觉痕迹 -->
     <img src="${shareImageUrl}" style="position: absolute; width: 350px; height: 350px; left: -9999px; top: -9999px; opacity: 0.01; pointer-events: none;" alt="WeChat-Share-Cover">
 
     <div id="search-panel">
